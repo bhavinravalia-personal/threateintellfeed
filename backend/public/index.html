@@ -1,0 +1,160 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Blue Team Threat Intelligence | SOC Dashboard</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <div class="header">
+    <div class="header-content">
+      <div class="header-title">
+        <h1>BLUE TEAM THREAT INTELLIGENCE CENTER</h1>
+        <p class="subtitle">Real-time CVE & Threat Feed Aggregation | SOC Dashboard</p>
+      </div>
+      <div class="stats">
+        <div class="stat-box">
+          <span class="stat-label">Total Threats</span>
+          <span class="stat-value" id="totalCount">0</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">Critical</span>
+          <span class="stat-value critical" id="criticalCount">0</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">High</span>
+          <span class="stat-value high" id="highCount">0</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">Last Update</span>
+          <span class="stat-value" id="lastUpdate">--:-- --</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">Sources Active</span>
+          <span class="stat-value" id="sourceCount">5/5</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="controls-section">
+      <div class="search-bar">
+        <input type="text" id="searchBox" placeholder="Search CVE ID, description, or threat..." />
+        <select id="severityFilter">
+          <option value="">All Severities</option>
+          <option value="CRITICAL">CRITICAL</option>
+          <option value="HIGH">HIGH</option>
+          <option value="MEDIUM">MEDIUM</option>
+          <option value="LOW">LOW</option>
+        </select>
+        <select id="sourceFilter">
+          <option value="">All Sources</option>
+          <option value="NVD">NVD</option>
+          <option value="CISA">CISA KEV</option>
+          <option value="CIRCL">CIRCL</option>
+          <option value="OTX">OTX</option>
+          <option value="URLhaus">URLhaus</option>
+          <option value="MalwareBazaar">MalwareBazaar</option>
+          <option value="OpenPhish">OpenPhish</option>
+          <option value="urlscan.io">urlscan.io</option>
+          <option value="AbuseIPDB">AbuseIPDB</option>
+        </select>
+        <select id="indicatorTypeFilter">
+          <option value="">All IOC Types</option>
+          <option value="CVE">CVE - Vulnerability</option>
+          <option value="URL">Malicious URL</option>
+          <option value="PHISHING_URL">Phishing URL</option>
+          <option value="HASH">Malware Hash</option>
+          <option value="IP">Malicious IP</option>
+          <option value="URL_SCAN">URL Scan Result</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="card full-width">
+      <div class="card-header">
+        <h2>Active Threats Feed</h2>
+        <span class="card-meta">Click any row for detailed analysis | External links to official sources</span>
+      </div>
+      <div class="table-wrapper">
+        <table id="feedTable" class="threats-table">
+          <thead>
+            <tr>
+              <th class="col-severity">Severity</th>
+              <th class="col-type">Type</th>
+              <th class="col-id">ID</th>
+              <th class="col-source">Source</th>
+              <th class="col-published">Published</th>
+              <th class="col-score">Risk</th>
+              <th class="col-description">Description</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="grid-3">
+      <div class="card">
+        <h2>Severity Distribution</h2>
+        <canvas id="severityChart" width="300" height="200"></canvas>
+      </div>
+      <div class="card">
+        <h2>Threat Sources</h2>
+        <canvas id="typeChart" width="300" height="200"></canvas>
+      </div>
+      <div class="card">
+        <h2>Timeline (24h)</h2>
+        <canvas id="timelineChart" width="300" height="200"></canvas>
+      </div>
+    </div>
+
+    <div class="card full-width">
+      <h2>Risk Score by Source</h2>
+      <div id="riskScores" class="risk-scores"></div>
+    </div>
+  </div>
+
+  <div id="cveModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="modalCveId">CVE Details</h2>
+        <button class="modal-close" onclick="closeCveModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-grid-2">
+          <div>
+            <h3>Threat Information</h3>
+            <table class="modal-info-table">
+              <tr><td class="label">ID:</td><td id="modalId">--</td></tr>
+              <tr><td class="label">Type:</td><td id="modalType">--</td></tr>
+              <tr><td class="label">Source:</td><td id="modalSource">--</td></tr>
+              <tr><td class="label">Severity:</td><td id="modalSeverity">--</td></tr>
+              <tr><td class="label">Risk Score:</td><td id="modalScore">--</td></tr>
+              <tr><td class="label">Published:</td><td id="modalPublished">--</td></tr>
+              <tr id="urlRow" style="display:none;"><td class="label">URL:</td><td id="modalUrl">--</td></tr>
+              <tr id="ipRow" style="display:none;"><td class="label">IP Address:</td><td id="modalIp">--</td></tr>
+              <tr id="hashRow" style="display:none;"><td class="label">Hash:</td><td id="modalHash">--</td></tr>
+              <tr id="familyRow" style="display:none;"><td class="label">Malware Family:</td><td id="modalFamily">--</td></tr>
+              <tr><td class="label">Description:</td><td id="modalDescription">--</td></tr>
+            </table>
+          </div>
+          <div>
+            <h3>External Resources</h3>
+            <div id="modalLinks" class="external-links"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button onclick="closeCveModal()" class="btn btn-secondary">Close</button>
+        <button id="openSourceBtn" class="btn btn-primary" onclick="openSourceLink()">Open Official Source</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/main.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "name": "intel-feed-backend",
+  "version": "1.0.0",
+  "description": "Simple threat intel feed backend serving a static dashboard",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "node-fetch": "^2.6.7"
+  }
+}
