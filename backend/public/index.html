@@ -76,6 +76,19 @@
 
     <div class="card full-width">
       <div class="card-header">
+        <h2>Upload IOC Evidence</h2>
+        <span class="card-meta">Upload a .txt, .csv, .pdf, .docx, or .doc file to extract indicators and query VirusTotal for a security score.</span>
+      </div>
+      <form id="uploadForm" class="upload-form">
+        <input type="file" id="uploadInput" accept=".txt,.csv,.pdf,.doc,.docx" required />
+        <button type="submit" class="btn btn-primary">Analyze File</button>
+      </form>
+      <div id="uploadStatus" class="upload-status">No file analyzed yet.</div>
+      <div id="uploadResults" class="upload-results"></div>
+    </div>
+
+    <div class="card full-width">
+      <div class="card-header">
         <h2>Active Threats Feed</h2>
         <span class="card-meta">Click any row for detailed analysis | External links to official sources</span>
       </div>

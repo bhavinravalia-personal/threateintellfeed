@@ -3,6 +3,10 @@ const searchBox = document.getElementById('searchBox');
 const severityFilter = document.getElementById('severityFilter');
 const sourceFilter = document.getElementById('sourceFilter');
 const indicatorTypeFilter = document.getElementById('indicatorTypeFilter');
+const uploadForm = document.getElementById('uploadForm');
+const uploadInput = document.getElementById('uploadInput');
+const uploadStatus = document.getElementById('uploadStatus');
+const uploadResults = document.getElementById('uploadResults');
 var items = [];
 let currentModalItem = null;
 
@@ -480,6 +484,63 @@ async function loadLatest(){
     console.error(e);
   }
 }
+
+function renderUploadResults(data) {
+  uploadResults.innerHTML = '';
+  if (!data || !data.ok) {
+    uploadStatus.textContent = data?.error || 'Upload failed.';
+    return;
+  }
+
+  uploadStatus.innerHTML = `Processed <strong>${escapeHtml(data.fileName || 'file')}</strong> as <strong>${escapeHtml(data.detectedFormat || 'unknown')}</strong>. Found <strong>${data.indicatorsFound || 0}</strong> indicators.`;
+
+  if (!data.vtResults || !data.vtResults.length) {
+    uploadResults.innerHTML = '<div class="upload-card">No indicators were detected in the uploaded content.</div>';
+    return;
+  }
+
+  const rows = data.vtResults.map((result) => {
+    const riskClass = (result.riskLevel || 'low') === 'high' ? 'risk-high' : (result.riskLevel || 'low') === 'medium' ? 'risk-medium' : '';
+    const scoreText = result.status === 'ok' ? `${result.securityScore}/100` : 'Unavailable';
+    return `
+      <div class="upload-card">
+        <h3>${escapeHtml(result.indicator || 'Indicator')}</h3>
+        <div class="result-meta">Type: ${escapeHtml(result.type || 'unknown')} • ${escapeHtml(result.status === 'ok' ? 'VirusTotal analyzed' : result.message || 'No result')}</div>
+        <div>
+          <span class="score-pill ${riskClass}">${escapeHtml(result.status === 'ok' ? `${result.securityScore}/100 security score` : 'Lookup failed')}</span>
+          ${result.status === 'ok' ? `<span class="score-pill">Risk: ${escapeHtml((result.riskLevel || 'low').toUpperCase())}</span>` : ''}
+        </div>
+        ${result.status === 'ok' ? `<div class="result-meta">Malicious: ${result.malicious || 0} • Suspicious: ${result.suspicious || 0} • Undetected: ${result.undetected || 0}</div>` : ''}
+        ${result.vtUrl ? `<div><a href="${result.vtUrl}" target="_blank" rel="noopener">View on VirusTotal ↗</a></div>` : ''}
+      </div>
+    `;
+  }).join('');
+
+  uploadResults.innerHTML = rows;
+}
+
+uploadForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const file = uploadInput.files[0];
+  if (!file) {
+    uploadStatus.textContent = 'Please choose a file to analyze.';
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+  uploadStatus.textContent = 'Analyzing file and querying VirusTotal...';
+  uploadResults.innerHTML = '';
+
+  try {
+    const response = await fetch('/api/upload', { method: 'POST', body: formData });
+    const data = await response.json();
+    renderUploadResults(data);
+  } catch (error) {
+    uploadStatus.textContent = 'Upload failed. Please try again.';
+    uploadResults.innerHTML = '<div class="upload-card">Unable to reach the backend.</div>';
+  }
+});
 
 // Search/Filter listeners
 searchBox.addEventListener('input', renderTable);

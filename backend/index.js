@@ -1,17 +1,77 @@
-require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
+const dotenv = require('dotenv');
+
+const envPath = path.join(__dirname, '.env');
+
+function loadEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return '';
+  const raw = fs.readFileSync(filePath);
+  let text = raw.toString('utf8');
+  if (text.includes('\u0000')) {
+    text = raw.toString('utf16le');
+  }
+  if (text.charCodeAt(0) === 0xFEFF) {
+    text = text.slice(1);
+  }
+  return text;
+}
+
+dotenv.config({ path: envPath });
+
+const envText = loadEnvFile(envPath);
+if (envText) {
+  envText.split(/\r?\n/).forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) return;
+    const separatorIndex = trimmed.indexOf('=');
+    if (separatorIndex === -1) return;
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const value = trimmed.slice(separatorIndex + 1).trim().replace(/^['"]|['"]$/g, '');
+    if (!process.env[key]) {
+      process.env[key] = value;
+    }
+  });
+}
 const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch');
+const multer = require('multer');
+const pdfParse = require('pdf-parse');
+const mammoth = require('mammoth');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = [
+      'text/plain',
+      'text/csv',
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/msword',
+      'application/octet-stream'
+    ];
+    if (allowed.includes(file.mimetype) || /\.(txt|csv|pdf|docx|doc)$/i.test(file.originalname)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Unsupported file type. Please upload a text, CSV, PDF, or Word document.'));
+    }
+  }
+});
 
 const PORT = process.env.PORT || 4000;
 const DB_FILE = path.join(__dirname, 'db.json');
 const FETCH_INTERVAL = (parseInt(process.env.FETCH_INTERVAL_SECONDS) || 300) * 1000;
+const DEFAULT_VT_API_KEY = 'a7f6f9dd70509548daf623f2fdee21064f1ffd9d0c6802539dcea3782ca29057';
+process.env.VT_API_KEY = process.env.VT_API_KEY || DEFAULT_VT_API_KEY;
+const VT_API_KEY = process.env.VT_API_KEY || '';
+const VT_BASE_URL = 'https://www.virustotal.com/api/v3';
 
 // Load or init DB
 function readDB(){
@@ -31,6 +91,128 @@ const clients = [];
 function sendSSE(data){
   const msg = `data: ${JSON.stringify(data)}\n\n`;
   clients.forEach(res => res.write(msg));
+}
+
+function getFileFormat(file, mimeType) {
+  const ext = (file.originalname || '').toLowerCase();
+  if (ext.endsWith('.pdf') || mimeType === 'application/pdf') return 'PDF';
+  if (ext.endsWith('.docx') || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return 'Word DOCX';
+  if (ext.endsWith('.doc') || mimeType === 'application/msword') return 'Word DOC';
+  if (ext.endsWith('.csv') || mimeType === 'text/csv') return 'CSV';
+  return 'Text/Plain';
+}
+
+async function extractTextFromUpload(file, mimeType) {
+  const buffer = file.buffer || Buffer.from('');
+  if (!buffer.length) return '';
+
+  if (mimeType === 'application/pdf') {
+    const pdfData = await pdfParse(buffer);
+    return pdfData.text || '';
+  }
+
+  if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    const result = await mammoth.extractRawText({ buffer });
+    return result.value || '';
+  }
+
+  if (mimeType === 'application/msword') {
+    return buffer.toString('utf8');
+  }
+
+  return buffer.toString('utf8');
+}
+
+function extractIndicators(text) {
+  const source = (text || '').toString();
+  const seen = new Set();
+  const results = [];
+
+  const addIndicator = (value, type) => {
+    const normalized = value.trim();
+    if (!normalized || seen.has(`${type}:${normalized.toLowerCase()}`)) return;
+    seen.add(`${type}:${normalized.toLowerCase()}`);
+    results.push({ type, value: normalized });
+  };
+
+  const cveRegex = /\bCVE-\d{4}-\d{4,7}\b/gi;
+  const ipRegex = /\b(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}\b/g;
+  const domainRegex = /(?:[a-z0-9-]+\.)+[a-z]{2,}/gi;
+  const urlRegex = /https?:\/\/[^\s,;]+/gi;
+  const hashRegex = /\b(?:[a-fA-F0-9]{32}|[a-fA-F0-9]{40}|[a-fA-F0-9]{64})\b/g;
+
+  source.matchAll(cveRegex).forEach((match) => addIndicator(match[0], 'cve'));
+  source.matchAll(ipRegex).forEach((match) => addIndicator(match[0], 'ip'));
+  source.matchAll(domainRegex).forEach((match) => addIndicator(match[0], 'domain'));
+  source.matchAll(urlRegex).forEach((match) => addIndicator(match[0], 'url'));
+  source.matchAll(hashRegex).forEach((match) => addIndicator(match[0], 'hash'));
+
+  return results;
+}
+
+function buildSecurityScore(stats) {
+  const total = Object.values(stats || {}).reduce((sum, value) => sum + Number(value || 0), 0);
+  if (!total) return { securityScore: 50, riskLevel: 'unknown' };
+
+  const malicious = Number(stats.malicious || 0);
+  const suspicious = Number(stats.suspicious || 0);
+  const safeScore = Math.max(0, Math.min(100, Math.round(100 - ((malicious + suspicious) / total) * 100)));
+  let riskLevel = 'low';
+  if (safeScore < 40) riskLevel = 'high';
+  else if (safeScore < 70) riskLevel = 'medium';
+  return { securityScore: safeScore, riskLevel };
+}
+
+async function queryVirusTotal(indicator) {
+  const encodedValue = encodeURIComponent(indicator.value);
+  const apiKey = (process.env.VT_API_KEY || VT_API_KEY || '').trim();
+  const headers = {
+    accept: 'application/json',
+    'x-apikey': apiKey,
+    ...(apiKey ? {} : {})
+  };
+
+  try {
+    console.log('[VT]', 'querying', indicator.value, 'with key', apiKey ? 'present' : 'missing');
+    const response = await fetch(`${VT_BASE_URL}/search?query=${encodedValue}`, { method: 'GET', headers });
+    const responseText = await response.text();
+    if (!response.ok) {
+      console.log('[VT]', 'request failed', response.status, responseText);
+      return {
+        indicator: indicator.value,
+        type: indicator.type,
+        status: 'error',
+        message: `VirusTotal lookup failed with status ${response.status}`
+      };
+    }
+
+    const json = JSON.parse(responseText);
+    const entry = Array.isArray(json.data) ? json.data[0] : null;
+    const attributes = entry && entry.attributes ? entry.attributes : {};
+    const stats = attributes.last_analysis_stats || {};
+    const security = buildSecurityScore(stats);
+
+    return {
+      indicator: indicator.value,
+      type: indicator.type,
+      status: 'ok',
+      securityScore: security.securityScore,
+      riskLevel: security.riskLevel,
+      vtUrl: `https://www.virustotal.com/gui/search/${encodedValue}`,
+      malicious: Number(stats.malicious || 0),
+      suspicious: Number(stats.suspicious || 0),
+      undetected: Number(stats.undetected || 0),
+      harmless: Number(stats.harmless || 0),
+      totalEngines: Object.values(stats).reduce((sum, value) => sum + Number(value || 0), 0)
+    };
+  } catch (error) {
+    return {
+      indicator: indicator.value,
+      type: indicator.type,
+      status: 'error',
+      message: error.message || 'VirusTotal request failed'
+    };
+  }
 }
 
 // API: latest items
@@ -53,6 +235,35 @@ app.get('/api/stream', (req, res) => {
     const idx = clients.indexOf(res);
     if(idx !== -1) clients.splice(idx, 1);
   });
+});
+
+app.post('/api/upload', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Please upload a file.' });
+    }
+
+    const mimeType = req.file.mimetype || 'text/plain';
+    const detectedFormat = getFileFormat(req.file, mimeType);
+    const extractedText = await extractTextFromUpload(req.file, mimeType);
+    const indicators = extractIndicators(extractedText).slice(0, 10);
+
+    const vtResults = await Promise.all(indicators.map((indicator) => queryVirusTotal(indicator)));
+
+    res.json({
+      ok: true,
+      fileName: req.file.originalname,
+      detectedFormat,
+      extractedTextPreview: extractedText.slice(0, 4000),
+      indicatorsFound: indicators.length,
+      indicators,
+      vtResults,
+      note: VT_API_KEY ? 'VirusTotal lookup completed with the configured API key.' : 'Set VT_API_KEY in your environment to enable live VirusTotal results.'
+    });
+  } catch (error) {
+    console.error('[UPLOAD]', error);
+    res.status(500).json({ error: error.message || 'Unable to process upload.' });
+  }
 });
 
 // Serve static frontend
@@ -451,4 +662,8 @@ async function fetchLatest(){
 fetchLatest();
 setInterval(fetchLatest, FETCH_INTERVAL);
 
-app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+if (require.main === module) {
+  app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+}
+
+module.exports = { app, extractIndicators };

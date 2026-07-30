@@ -350,6 +350,87 @@ body {
   font-weight: 600;
 }
 
+/* UPLOAD ANALYZER */
+.upload-form {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.upload-form input {
+  flex: 1;
+  min-width: 240px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 212, 255, 0.25);
+  background: rgba(5, 15, 30, 0.92);
+  color: #e0f7ff;
+}
+
+.upload-status {
+  font-size: 0.95rem;
+  color: #00d4ff;
+  margin-bottom: 12px;
+}
+
+.upload-results {
+  display: grid;
+  gap: 12px;
+}
+
+.upload-card {
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  border-radius: 10px;
+  padding: 14px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.upload-card h3 {
+  color: #00ff99;
+  margin-bottom: 8px;
+  font-size: 1rem;
+}
+
+.upload-card .result-meta {
+  color: #9fdcff;
+  font-size: 0.88rem;
+  margin-bottom: 8px;
+}
+
+.upload-card .score-pill {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  margin-right: 8px;
+  background: rgba(0, 255, 153, 0.15);
+  color: #00ff99;
+  border: 1px solid rgba(0, 255, 153, 0.2);
+}
+
+.upload-card .score-pill.risk-high {
+  background: rgba(255, 68, 68, 0.15);
+  color: #ff4444;
+  border-color: rgba(255, 68, 68, 0.2);
+}
+
+.upload-card .score-pill.risk-medium {
+  background: rgba(255, 170, 0, 0.15);
+  color: #ffaa00;
+  border-color: rgba(255, 170, 0, 0.2);
+}
+
+.upload-card a {
+  color: #00d4ff;
+  text-decoration: none;
+}
+
+.upload-card a:hover {
+  color: #00ff99;
+}
+
 /* SUMMARY SECTION */
 .summary-section {
   display: grid;
