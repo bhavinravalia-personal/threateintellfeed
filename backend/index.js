@@ -124,28 +124,44 @@ async function extractTextFromUpload(file, mimeType) {
 }
 
 function extractIndicators(text) {
-  const source = (text || '').toString();
+  const source = (text || '').toString()
+    .replace(/\bhxxps?\s*\[:\]\s*\/\//gi, (scheme) => /^hxxps/i.test(scheme) ? 'https://' : 'http://')
+    .replace(/\[\.\]|\(\.\)|\{\.\}/g, '.')
+    .replace(/\[:\]/g, ':');
   const seen = new Set();
   const results = [];
-
-  const addIndicator = (value, type) => {
-    const normalized = value.trim();
-    if (!normalized || seen.has(`${type}:${normalized.toLowerCase()}`)) return;
-    seen.add(`${type}:${normalized.toLowerCase()}`);
-    results.push({ type, value: normalized });
-  };
-
-  const cveRegex = /\bCVE-\d{4}-\d{4,7}\b/gi;
   const ipRegex = /\b(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}\b/g;
   const domainRegex = /(?:[a-z0-9-]+\.)+[a-z]{2,}/gi;
   const urlRegex = /https?:\/\/[^\s,;]+/gi;
   const hashRegex = /\b(?:[a-fA-F0-9]{32}|[a-fA-F0-9]{40}|[a-fA-F0-9]{64})\b/g;
+  const candidates = [];
 
-  source.matchAll(cveRegex).forEach((match) => addIndicator(match[0], 'cve'));
-  source.matchAll(ipRegex).forEach((match) => addIndicator(match[0], 'ip'));
-  source.matchAll(domainRegex).forEach((match) => addIndicator(match[0], 'domain'));
-  source.matchAll(urlRegex).forEach((match) => addIndicator(match[0], 'url'));
-  source.matchAll(hashRegex).forEach((match) => addIndicator(match[0], 'hash'));
+  const collectMatches = (regex, type) => {
+    for (const match of source.matchAll(regex)) {
+      const value = type === 'url' ? match[0].replace(/[),.;!?]+$/g, '') : match[0];
+      candidates.push({ type, value, start: match.index, end: match.index + value.length });
+    }
+  };
+
+  collectMatches(ipRegex, 'ip');
+  collectMatches(domainRegex, 'domain');
+  collectMatches(urlRegex, 'url');
+  collectMatches(hashRegex, 'hash');
+  candidates.sort((left, right) => left.start - right.start);
+
+  const urlRanges = candidates.filter((candidate) => candidate.type === 'url');
+  for (const candidate of candidates) {
+    if (candidate.type === 'ip' || candidate.type === 'domain') {
+      const isUrlHost = urlRanges.some((url) => candidate.start >= url.start && candidate.start < url.end);
+      if (isUrlHost) continue;
+    }
+
+    const value = candidate.value.trim();
+    const key = `${candidate.type}:${value.toLowerCase()}`;
+    if (!value || seen.has(key)) continue;
+    seen.add(key);
+    results.push({ type: candidate.type, value });
+  }
 
   return results;
 }
@@ -161,6 +177,17 @@ function buildSecurityScore(stats) {
   if (safeScore < 40) riskLevel = 'high';
   else if (safeScore < 70) riskLevel = 'medium';
   return { securityScore: safeScore, riskLevel };
+}
+
+function getVirusTotalUrl(indicator, entry) {
+  const encodedValue = encodeURIComponent(indicator.value);
+  if (indicator.type !== 'url') return `https://www.virustotal.com/gui/search/${encodedValue}`;
+
+  const urlId = entry && entry.id || Buffer.from(indicator.value, 'utf8').toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+  return `https://www.virustotal.com/gui/url/${urlId}`;
 }
 
 async function queryVirusTotal(indicator) {
@@ -198,7 +225,7 @@ async function queryVirusTotal(indicator) {
       status: 'ok',
       securityScore: security.securityScore,
       riskLevel: security.riskLevel,
-      vtUrl: `https://www.virustotal.com/gui/search/${encodedValue}`,
+      vtUrl: getVirusTotalUrl(indicator, entry),
       malicious: Number(stats.malicious || 0),
       suspicious: Number(stats.suspicious || 0),
       undetected: Number(stats.undetected || 0),
@@ -246,7 +273,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     const mimeType = req.file.mimetype || 'text/plain';
     const detectedFormat = getFileFormat(req.file, mimeType);
     const extractedText = await extractTextFromUpload(req.file, mimeType);
-    const indicators = extractIndicators(extractedText).slice(0, 10);
+    const indicators = extractIndicators(extractedText);
 
     const vtResults = await Promise.all(indicators.map((indicator) => queryVirusTotal(indicator)));
 
