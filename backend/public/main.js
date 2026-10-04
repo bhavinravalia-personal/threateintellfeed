@@ -499,6 +499,23 @@ function renderUploadResults(data) {
     return;
   }
 
+  const csvHeaders = ['Indicator', 'Type', 'Status', 'Security Score', 'Risk Level', 'Malicious', 'Suspicious', 'Undetected', 'Harmless', 'Total Engines', 'VirusTotal URL', 'Message'];
+  const escapeCsvCell = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`;
+  const csvRows = data.vtResults.map((result) => [
+    result.indicator,
+    result.type,
+    result.status,
+    result.securityScore,
+    result.riskLevel,
+    result.malicious,
+    result.suspicious,
+    result.undetected,
+    result.harmless,
+    result.totalEngines,
+    result.vtUrl,
+    result.message
+  ]);
+
   const rows = data.vtResults.map((result) => {
     const riskClass = (result.riskLevel || 'low') === 'high' ? 'risk-high' : (result.riskLevel || 'low') === 'medium' ? 'risk-medium' : '';
     const scoreText = result.status === 'ok' ? `${result.securityScore}/100` : 'Unavailable';
@@ -516,7 +533,18 @@ function renderUploadResults(data) {
     `;
   }).join('');
 
-  uploadResults.innerHTML = rows;
+  uploadResults.innerHTML = `<div class="upload-actions"><button type="button" class="btn btn-primary" id="downloadCsvButton">Download CSV</button></div>${rows}`;
+  document.getElementById('downloadCsvButton').addEventListener('click', () => {
+    const csv = [csvHeaders, ...csvRows].map((row) => row.map(escapeCsvCell).join(',')).join('\r\n');
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
+    const downloadUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const fileBaseName = (data.fileName || 'ioc-analysis').replace(/\.[^.]+$/, '').replace(/[^a-z0-9_-]+/gi, '_');
+    link.href = downloadUrl;
+    link.download = `${fileBaseName || 'ioc-analysis'}-analysis.csv`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+  });
 }
 
 uploadForm.addEventListener('submit', async (event) => {
